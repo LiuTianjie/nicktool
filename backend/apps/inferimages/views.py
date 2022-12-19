@@ -1,3 +1,5 @@
+import uuid
+
 from django.shortcuts import render
 
 # Create your views here.
@@ -8,31 +10,16 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import serializers
 from rest_framework import status
-
 from apps.inferimages.models import ImageTask
-
-
-# class LimitImageField(models.ImageField):
-#     def __init__(self, *args, **kwargs):
-#         self.max_upload_size = kwargs.pop("max_upload_size", [])
-#         super().__init__(*args, **kwargs)
-#
-#     def clean(self, *args, **kwargs):
-#         data = super().clean(*args, **kwargs)
-#         file = data.file
-#         try:
-#             if file.size > self.max_upload_size:
-#                 raise forms.ValidationError("上传图片大小不能超过：{}, 当前大小：{}".format(
-#                     filesizeformat(self.max_upload_size), filesizeformat(file.size)))
-#         except AttributeError:
-#             pass
-#         return data
 
 
 class ImageTaskSerializers(serializers.ModelSerializer):
     image_content = serializers.ImageField()
+    task_id = serializers.CharField(required=False)
+    task_status = serializers.BooleanField(required=False, default=False)
 
     def validate_image_content(self, data):
+        # 校验文件大小
         max_upload_size = 5242880
         try:
             if data.size > max_upload_size:
@@ -44,7 +31,7 @@ class ImageTaskSerializers(serializers.ModelSerializer):
 
     class Meta:
         model = ImageTask
-        fields = ['image_content']
+        fields = ['image_content', 'task_id', 'task_status']
 
 
 # 生产者，获取任务，上传到消息队列，数据库中存储相关状态
@@ -52,8 +39,11 @@ class ImageTaskSerializers(serializers.ModelSerializer):
 def create_infer_task(request):
     serializer = ImageTaskSerializers(data=request.data)
     if serializer.is_valid(raise_exception=True):
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # TODO: 先校验文件的hash值是否已经在redis中，如果是，表示该任务已经创建过，返回已创建的task_id即可
+        task_id = uuid.uuid4()
+        # TODO: 上传任务到RabbitMQ
+        serializer.save(task_id=task_id, task_status=False)
+        return Response({"code": 200, "message": "上传成功！", "task_id": task_id}, status=status.HTTP_201_CREATED)
 
 
 # 根据任务id查询已完成的任务
@@ -61,7 +51,18 @@ def create_infer_task(request):
 def get_infer_image(request):
     task_id = request.query_params.get("task_id", None)
     if task_id:
-        # TODO: Search image by id and return.
-        return Response("success", status=status.HTTP_200_OK)
+        image = ImageTask.objects.filter(task_id=task_id).first()
+        if image:
+            if image.task_status:
+                # TODO: 返回image的base64值以及下载链接地址
+                return Response({"msg": "success", "code": 200, "task_id": task_id, "image_status": "已完成",
+                                 "image": image.image_content},
+                                status=status.HTTP_200_OK)
+            else:
+                return Response({"msg": "success", "code": 200, "task_id": task_id, "image_status": "未完成"},
+                                status=status.HTTP_200_OK)
+        else:
+            return Response({"msg": "没有查询到任务", "code": 401, "task_id": task_id},
+                            status=status.HTTP_400_BAD_REQUEST)
     else:
-        return Response("Missing Parameter task_id!", status=status.HTTP_400_BAD_REQUEST)
+        return Response({"msg": "缺少task_id参数！", "code": 400}, status=status.HTTP_400_BAD_REQUEST)
