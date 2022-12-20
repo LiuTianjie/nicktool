@@ -16,9 +16,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from apps.inferimages.views import create_infer_task, get_infer_image
+from django.conf.urls.static import static
+from django.conf import settings
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('create_infer_task', create_infer_task),
-    path('get_infer_image', get_infer_image)
-]
+                  path('admin/', admin.site.urls),
+                  path('create_infer_task', create_infer_task),
+                  path('get_infer_image', get_infer_image)
+              ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

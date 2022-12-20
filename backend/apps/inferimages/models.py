@@ -6,3 +6,4 @@ class ImageTask(models.Model):
     infer_time = models.DateTimeField(null=True, blank=True)
     task_status = models.BooleanField(default=False)
     image_content = models.ImageField()
+    image_after = models.ImageField(null=True)

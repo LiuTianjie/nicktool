@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from django.shortcuts import render
@@ -11,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework import serializers
 from rest_framework import status
 from apps.inferimages.models import ImageTask
+from apps.inferimages.produce import ImageTaskProducer
 
 
 class ImageTaskSerializers(serializers.ModelSerializer):
@@ -41,8 +43,9 @@ def create_infer_task(request):
     if serializer.is_valid(raise_exception=True):
         # TODO: 先校验文件的hash值是否已经在redis中，如果是，表示该任务已经创建过，返回已创建的task_id即可
         task_id = uuid.uuid4()
-        # TODO: 上传任务到RabbitMQ
         serializer.save(task_id=task_id, task_status=False)
+        image = ImageTask.objects.filter(task_id=task_id).first()
+        ImageTaskProducer.publish(json.dumps(ImageTaskSerializers(image).data))
         return Response({"code": 200, "message": "上传成功！", "task_id": task_id}, status=status.HTTP_201_CREATED)
 
 
@@ -53,16 +56,10 @@ def get_infer_image(request):
     if task_id:
         image = ImageTask.objects.filter(task_id=task_id).first()
         if image:
-            if image.task_status:
-                # TODO: 返回image的base64值以及下载链接地址
-                return Response({"msg": "success", "code": 200, "task_id": task_id, "image_status": "已完成",
-                                 "image": image.image_content},
-                                status=status.HTTP_200_OK)
-            else:
-                return Response({"msg": "success", "code": 200, "task_id": task_id, "image_status": "未完成"},
-                                status=status.HTTP_200_OK)
+            return Response({"msg": "success", "code": 200, "image": ImageTaskSerializers(image).data},
+                            status=status.HTTP_200_OK)
         else:
-            return Response({"msg": "没有查询到任务", "code": 401, "task_id": task_id},
+            return Response({"msg": "没有查询到任务", "code": 400, "task_id": task_id},
                             status=status.HTTP_400_BAD_REQUEST)
     else:
         return Response({"msg": "缺少task_id参数！", "code": 400}, status=status.HTTP_400_BAD_REQUEST)
